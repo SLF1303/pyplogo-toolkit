@@ -1,0 +1,4 @@
+matplotlib>=3.7.0
+numpy>=1.24.0
+biopython>=1.80
+# DSSP需要安装DSSP并设置到系统变量中
