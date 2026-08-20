@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
 from matplotlib import gridspec
-from typing import Optional, List, Tuple, Dict, Union, Callable
+from typing import Optional, List, Tuple, Dict, Union, Callable, Mapping, Sequence
 import warnings
 from Bio.PDB import PDBParser, MMCIFParser
 from Bio.PDB.Polypeptide import is_aa
@@ -21,6 +21,7 @@ class SecondaryStructureVisualizer:
         'S': '#8CD0E3',      # bend - light blue
         'C': '#A69F98',      # coil - gray
         'sequence': '#2D3748', # amino acid sequence
+        'structure_label': '#616971', # secondary-structure track label
         'residue_number': '#718096',   # residue index
         'edge': '#4A4643',    # structure edges
         'background': '#FFFAF5', # background color
@@ -57,6 +58,8 @@ class SecondaryStructureVisualizer:
                  # 新增颜色方案参数
                  colors: Optional[Dict[str, str]] = None,
                  disulfide_font_size: int = 12,
+                 disulfide_height_offset: float = 17.0,
+                 residue_number_font_size: Optional[int] = None,
                  # 新增图例位置参数
                  legend_position: str = 'right',  # 'bottom' 或 'right'
                  residue_number_position: float = 0.5):  # 0.0=最低, 1.0=最高
@@ -88,7 +91,9 @@ class SecondaryStructureVisualizer:
             vertical_spacing: 垂直间距比例 (0-1)
             colors: 自定义颜色方案字典，覆盖默认颜色
             disulfide_font_size: 二硫键标记字体大小
-            legend_position: 图例位置 ('bottom' 或 'right')
+             disulfide_height_offset: 二硫键标记高度偏移量 (默认: 17.0，值越大位置越低)
+             residue_number_font_size: 残基编号字体大小 (默认: None，自动使用 aa_font_size - 2)
+             legend_position: 图例位置 ('bottom' 或 'right')
         """
         # 存储所有参数
         self.row_length = row_length
@@ -97,6 +102,9 @@ class SecondaryStructureVisualizer:
         self.aa_font_family = aa_font_family
         self.legend_position = legend_position
         self.disulfide_font_size = disulfide_font_size
+        self.disulfide_height_offset = disulfide_height_offset
+        self.residue_number_font_size = residue_number_font_size if residue_number_font_size is not None else aa_font_size - 2
+        self.residue_number_position = residue_number_position
         
         # 螺旋参数
         self.helix_intra_unit_overlap = helix_intra_unit_overlap
@@ -174,7 +182,6 @@ class SecondaryStructureVisualizer:
         self.ax = None
         self.highlight_regions = []  # 存储高亮区域信息
         self.disulfide_bonds = []  # 存储二硫键连接 [(cys1_index, cys2_index), ...]
-        self.residue_number_position = residue_number_position  # 0.0=最低, 1.0=最高
     
     def set_colors(self, colors: Dict[str, str]):
         """设置自定义颜色方案"""
@@ -419,6 +426,647 @@ class SecondaryStructureVisualizer:
             self._draw_disulfide_bonds(self.ax)
         
         return self.fig
+
+    def create_alignment_figure(self,
+                                alignment: Mapping[str, str],
+                                structure_sequence: str,
+                                secondary_structure: str,
+                                amino_acids_per_line: Optional[int] = None,
+                                show_legend: bool = False,
+                                legend_position: str = 'right',
+                                title: Optional[str] = None,
+                                dpi: int = 300,
+                                figsize: Optional[Tuple[float, float]] = None,
+                                structure_label: Optional[str] = None,
+                                structure_mode: str = 'major',
+                                sequence_colors: Optional[Mapping[str, str]] = None,
+                                disulfide_bonds: Optional[Sequence[Tuple[int, int]]] = None,
+                                show_disulfide_bonds: bool = True,
+                                epitope_annotations: Optional[Mapping[str, Sequence[int]]] = None,
+                                epitope_colors: Optional[Mapping[str, str]] = None,
+                                show_epitope_legend: bool = True,
+                                epitope_marker: str = '^',
+                                epitope_marker_size: float = 13.0,
+                                epitope_legend_marker_size: float = 4.4,
+                                epitope_legend_position: str = 'lower right',
+                                epitope_legend_columns: Optional[int] = None,
+                                sequence_font_size: Optional[float] = None,
+                                label_font_size: Optional[float] = None,
+                                sequence_pitch: float = 0.18,
+                                structure_offset: float = 0.15,
+                                annotation_offset: float = 0.12,
+                                annotation_track_spacing: float = 0.105,
+                                show_residue_numbers: bool = True,
+                                show_conservation: bool = True,
+                                conservation_threshold: float = 0.75,
+                                conservation_full_color: str = '#EAF0EE',
+                                conservation_partial_color: str = '#F3F5F4',
+                                disulfide_color: str = '#2E9663',
+                                disulfide_text_color: str = '#237A51',
+                                disulfide_line_width: float = 0.65,
+                                disulfide_line_length: float = 0.28,
+                                disulfide_font_size: float = 5.2,
+                                disulfide_line_offset: float = 0.05,
+                                disulfide_label_offset: float = -0.05,
+                                legend_columns: int = 4,
+                                legend_font_size: Optional[float] = None) -> plt.Figure:
+        """Draw a compact, publication-style alignment with one structure track.
+
+        The alignment uses a dedicated coordinate system: one x unit is one
+        alignment column and the structure glyphs occupy a short annotation band
+        above the sequence rows.  This deliberately differs from the spacious
+        single-sequence canvas used by :meth:`create_figure`. ``structure_label``
+        defaults to the selected sequence name and may be replaced with any text.
+        ``structure_mode='major'`` (the default) renders helices, beta strands,
+        and turns; ``'all'`` also renders bends and coil segments. Disulfide and
+        epitope positions use 1-based, ungapped coordinates from the selected
+        structure sequence. The alignment-specific style controls below keep
+        the current publication style as defaults while allowing fine tuning of
+        typography, spacing, legends, conservation bands, and annotations.
+
+        Common customization controls:
+            ``sequence_font_size``, ``label_font_size``, ``sequence_pitch`` and
+            ``structure_offset`` control typography and row spacing;
+            ``show_residue_numbers``, ``show_conservation`` and
+            ``conservation_threshold`` control alignment scaffolding;
+            ``legend_position``, ``legend_columns`` and ``legend_font_size``
+            control the structure legend; ``show_epitope_legend``,
+            ``epitope_marker``, ``epitope_marker_size``,
+            ``epitope_legend_position`` and ``epitope_legend_columns`` control
+            epitope markers and their legend; ``disulfide_color``,
+            ``disulfide_text_color``, ``disulfide_line_width``,
+            ``disulfide_line_length``, ``disulfide_font_size``,
+            ``disulfide_line_offset`` and ``disulfide_label_offset`` control
+            the paired disulfide annotations. Structure colors remain
+            configurable through the visualizer ``colors`` argument.
+        """
+        if not alignment:
+            raise ValueError("Alignment cannot be empty")
+        if not isinstance(alignment, Mapping):
+            raise TypeError("alignment must be a mapping of names to sequences")
+        if not isinstance(secondary_structure, str):
+            raise TypeError("secondary_structure must be a string")
+        if not isinstance(structure_sequence, str):
+            raise TypeError("structure_sequence must be a sequence name")
+        if structure_label is not None and not isinstance(structure_label, str):
+            raise TypeError("structure_label must be a string or None")
+        if structure_mode not in {'major', 'all'}:
+            raise ValueError("structure_mode must be 'major' or 'all'")
+        if sequence_colors is not None and (
+                not isinstance(sequence_colors, Mapping)
+                or any(not isinstance(name, str) or not isinstance(color, str)
+                       for name, color in sequence_colors.items())):
+            raise TypeError("sequence_colors must map sequence names to color strings")
+        if not isinstance(show_disulfide_bonds, bool):
+            raise TypeError("show_disulfide_bonds must be a boolean")
+        if not isinstance(show_epitope_legend, bool) or not isinstance(show_residue_numbers, bool):
+            raise TypeError("show_epitope_legend and show_residue_numbers must be booleans")
+        if not isinstance(show_conservation, bool):
+            raise TypeError("show_conservation must be a boolean")
+        if epitope_annotations is not None and not isinstance(epitope_annotations, Mapping):
+            raise TypeError("epitope_annotations must map labels to residue positions")
+        if epitope_colors is not None and (
+                not isinstance(epitope_colors, Mapping)
+                or any(not isinstance(name, str) or not isinstance(color, str)
+                       for name, color in epitope_colors.items())):
+            raise TypeError("epitope_colors must map annotation labels to color strings")
+        positive_values = {
+            'epitope_marker_size': epitope_marker_size,
+            'epitope_legend_marker_size': epitope_legend_marker_size,
+            'sequence_pitch': sequence_pitch,
+            'annotation_track_spacing': annotation_track_spacing,
+            'disulfide_line_width': disulfide_line_width,
+            'disulfide_line_length': disulfide_line_length,
+            'disulfide_font_size': disulfide_font_size,
+        }
+        if sequence_font_size is not None:
+            positive_values['sequence_font_size'] = sequence_font_size
+        if label_font_size is not None:
+            positive_values['label_font_size'] = label_font_size
+        if legend_font_size is not None:
+            positive_values['legend_font_size'] = legend_font_size
+        if any(not isinstance(value, (int, float)) or value <= 0
+               for value in positive_values.values()):
+            raise ValueError("font sizes, spacing, and line dimensions must be positive")
+        offsets = (structure_offset, annotation_offset,
+                   disulfide_line_offset, disulfide_label_offset)
+        if any(not isinstance(value, (int, float)) for value in offsets):
+            raise TypeError("structure and annotation offsets must be numeric")
+        if not isinstance(conservation_threshold, (int, float)) \
+                or not 0 < conservation_threshold <= 1:
+            raise ValueError("conservation_threshold must be in the interval (0, 1]")
+        if not isinstance(legend_columns, int) or legend_columns <= 0:
+            raise ValueError("legend_columns must be a positive integer")
+        if epitope_legend_columns is not None \
+                and (not isinstance(epitope_legend_columns, int) or epitope_legend_columns <= 0):
+            raise ValueError("epitope_legend_columns must be a positive integer or None")
+        if not isinstance(epitope_marker, str) or not epitope_marker:
+            raise TypeError("epitope_marker must be a non-empty Matplotlib marker string")
+        if not isinstance(legend_position, str) or not isinstance(epitope_legend_position, str):
+            raise TypeError("legend positions must be strings")
+        if annotation_offset < 0 or annotation_track_spacing < \
+                disulfide_line_offset - disulfide_label_offset:
+            raise ValueError(
+                "annotation_offset must be non-negative and annotation_track_spacing "
+                "must leave room between disulfide lines and labels"
+            )
+
+        items = list(alignment.items())
+        if any(not isinstance(name, str) or not name or not isinstance(sequence, str)
+               for name, sequence in items):
+            raise TypeError("Alignment must map non-empty sequence names to strings")
+
+        alignment_length = len(items[0][1])
+        if alignment_length == 0 or any(len(sequence) != alignment_length
+                                        for _, sequence in items):
+            raise ValueError("All aligned sequences must have the same non-zero length")
+        if structure_sequence not in alignment:
+            raise ValueError(f"Unknown structure sequence: {structure_sequence}")
+
+        per_line = self.row_length if amino_acids_per_line is None else amino_acids_per_line
+        if not isinstance(per_line, int) or per_line <= 0:
+            raise ValueError("amino_acids_per_line must be a positive integer")
+
+        selected = alignment[structure_sequence]
+        ungapped_length = sum(char not in '-.' for char in selected)
+        raw_bonds = self.disulfide_bonds if disulfide_bonds is None else disulfide_bonds
+        try:
+            bonds = [tuple(bond) for bond in raw_bonds]
+        except TypeError as exc:
+            raise TypeError("disulfide_bonds must contain residue-position pairs") from exc
+        if any(len(bond) != 2 or any(not isinstance(position, int) for position in bond)
+               for bond in bonds):
+            raise TypeError("disulfide_bonds must contain integer residue-position pairs")
+
+        epitope_items = []
+        for name, positions in (epitope_annotations or {}).items():
+            if not isinstance(name, str) or not name or isinstance(positions, (str, bytes)):
+                raise TypeError("epitope_annotations must map labels to integer positions")
+            try:
+                positions = tuple(positions)
+            except TypeError as exc:
+                raise TypeError(
+                    "epitope_annotations must map labels to integer positions"
+                ) from exc
+            if any(not isinstance(position, int) for position in positions):
+                raise TypeError("epitope annotations must contain integer positions")
+            epitope_items.append((name, positions))
+
+        annotated_positions = [position for bond in bonds for position in bond]
+        annotated_positions.extend(
+            position for _, positions in epitope_items for position in positions
+        )
+        if any(position < 1 or position > ungapped_length
+               for position in annotated_positions):
+            raise ValueError(
+                "Disulfide and epitope positions must fall within the selected sequence"
+            )
+        residue_columns = {}
+        residue_position = 0
+        for column, residue in enumerate(selected):
+            if residue not in '-.':
+                residue_position += 1
+                residue_columns[residue_position] = column
+
+        secondary_structure = secondary_structure.upper()
+        if len(secondary_structure) == ungapped_length:
+            structure_iter = iter(secondary_structure)
+            aligned_structure = ''.join(
+                ' ' if char in '-.' else next(structure_iter) for char in selected
+            )
+        elif len(secondary_structure) == alignment_length:
+            aligned_structure = ''.join(
+                ' ' if char in '-.' else ss
+                for char, ss in zip(selected, secondary_structure)
+            )
+        else:
+            raise ValueError(
+                "Secondary structure length must match the selected sequence "
+                "with or without alignment gaps"
+            )
+
+        aligned_structure = aligned_structure.replace('-', ' ').replace('.', ' ')
+        invalid_codes = set(aligned_structure) - set('HGIESTC ')
+        if invalid_codes:
+            raise ValueError(f"Unknown secondary structure codes: {sorted(invalid_codes)}")
+
+        self.sequence = selected
+        self.secondary_structure = aligned_structure
+        self.row_length = per_line
+        displayed_structure_label = structure_sequence \
+            if structure_label is None else structure_label
+        block_count = (alignment_length + per_line - 1) // per_line
+        display_columns = min(per_line, alignment_length)
+        sequence_font_size = (
+            min(8.0, max(6.5, self.aa_font_size * 0.48))
+            if sequence_font_size is None else float(sequence_font_size)
+        )
+        label_font_size = (
+            max(6.5, sequence_font_size * 0.94)
+            if label_font_size is None else float(label_font_size)
+        )
+        has_disulfide_track = show_disulfide_bonds and bool(bonds)
+        annotation_pitch = float(annotation_track_spacing)
+        annotation_track_count = len(epitope_items) + int(has_disulfide_track)
+        annotation_depth = (
+            annotation_offset + (annotation_track_count - 1) * annotation_pitch
+            if annotation_track_count else 0.0
+        )
+        block_height = len(items) * sequence_pitch + 0.55 + annotation_depth
+        block_top = {block: -block * block_height for block in range(block_count)}
+        self.row_y_positions = {
+            block: block_top[block] - structure_offset for block in range(block_count)
+        }
+        self.aa_positions = [
+            (index % per_line + 0.5, index // per_line)
+            for index in range(alignment_length)
+        ]
+        self._identify_contiguous_regions(aligned_structure)
+
+        longest_name = max(len(displayed_structure_label),
+                           max(len(name) for name, _ in items))
+        label_inches = longest_name * label_font_size * 0.60 / 72
+        width_inches = max(
+            3.8,
+            min(12.5, 0.45 + label_inches + display_columns * 0.105)
+        )
+        top_space = 0.30 if title or show_legend else 0.12
+        height_inches = max(
+            1.50,
+            top_space + block_count * (
+                0.30 + 0.16 * len(items) + 0.75 * annotation_depth
+            ) + (0.16 if epitope_items else 0)
+        )
+        fig_width = width_inches * self.fig_width_scale
+        fig_height = height_inches * self.fig_height_scale
+        if figsize is None:
+            figsize = (fig_width, fig_height)
+
+        self.fig, self.ax = plt.subplots(figsize=figsize, dpi=dpi)
+        # The default single-sequence canvas is warm, while alignments are
+        # rendered on white to match current structural-biology figures.
+        background = '#FFFFFF' if self.colors['background'] == self.DEFAULT_COLORS['background'] \
+            else self.colors['background']
+        self.fig.set_facecolor(background)
+        self.ax.set_facecolor(background)
+
+        structure_colors = {
+            'H': '#3E8F5A', 'G': '#B96F91', 'I': '#4F70C8',
+            'E': '#E5BF70', 'T': '#9D8BC5', 'S': '#55AFC2',
+            'C': '#A7ADB1',
+        }
+        for code in structure_colors:
+            if code in self.colors and self.colors[code] != self.DEFAULT_COLORS[code]:
+                structure_colors[code] = self.colors[code]
+        visible_codes = set('HGIET') if structure_mode == 'major' else set('HGIESTC')
+        sequence_colors = dict(sequence_colors or {})
+        default_epitope_colors = {
+            'h5C_4 epitope': '#8FB9DB',
+            'C05 epitope': '#D39A9B',
+            'D07 epitope': '#AFC56F',
+        }
+        fallback_epitope_colors = ('#5D9DC6', '#C47F82', '#8EAA4E', '#8B78B5')
+        resolved_epitope_colors = {}
+        for index, (name, _) in enumerate(epitope_items):
+            resolved_epitope_colors[name] = (epitope_colors or {}).get(
+                name,
+                default_epitope_colors.get(
+                    name, fallback_epitope_colors[index % len(fallback_epitope_colors)]
+                ),
+            )
+        structure_label_color = self.colors.get('structure_label', '#616971')
+        mono_family = 'DejaVu Sans Mono'
+        backbone_color = '#B5BABE'
+
+        def draw_structure(ax, start, end, code, y, terminal=True):
+            """Draw one structure segment on shared integer column edges."""
+            left, right = float(start), float(end + 1)
+            color = structure_colors[code]
+            if code in {'H', 'G', 'I'}:
+                # Preserve PyPlogo's original helix language: each residue is
+                # a dark/light overlapping parallelogram pair.  The geometry
+                # is scaled to one alignment column instead of reusing the
+                # large single-sequence dimensions.
+                # Keep the original 15:12:12 width/overlap/skew relationship,
+                # with a small compactness correction for the tighter MSA row.
+                # The reduced height keeps the motif subordinate to the
+                # residue glyphs while the brighter facet preserves the
+                # interlocking diamond rhythm at journal figure scale.
+                light = self._adjust_color(color, 1.42)
+                compact = 0.90
+                width = compact * 15 / 28
+                overlap = compact * 12 / 28
+                skew = compact * 12 / 28
+                half_height = 0.064
+                unit_width = 2 * width - overlap
+                x_adjustment = (1.0 - unit_width) / 2
+                clip = patches.Rectangle(
+                    (left, y - 0.14), right - left, 0.28,
+                    transform=ax.transData
+                )
+                for cell in range(start, end + 1):
+                    center = cell + 0.5 + x_adjustment
+                    dark_vertices = [
+                        (center - width, y - half_height),
+                        (center - width - skew, y + half_height),
+                        (center - skew, y + half_height),
+                        (center, y - half_height),
+                    ]
+                    light_vertices = [
+                        (center - overlap, y - half_height),
+                        (center - overlap + skew, y + half_height),
+                        (center - overlap + width + skew, y + half_height),
+                        (center - overlap + width, y - half_height),
+                    ]
+                    for vertices, facecolor, zorder in (
+                        (light_vertices, light, 3),
+                        (dark_vertices, color, 4),
+                    ):
+                        patch = patches.Polygon(
+                            vertices, closed=True, facecolor=facecolor,
+                            edgecolor='none', zorder=zorder
+                        )
+                        patch.set_clip_path(clip)
+                        ax.add_patch(patch)
+            elif code == 'E':
+                width = right - left
+                body = 0.034
+                if terminal:
+                    head = min(0.30, max(0.20, width * 0.18))
+                    head_half = 0.076
+                    points = [
+                        (left, y - body), (right - head, y - body),
+                        (right - head, y - head_half), (right, y),
+                        (right - head, y + head_half), (right - head, y + body),
+                        (left, y + body),
+                    ]
+                else:
+                    # A wrapped beta strand continues as a flat ribbon; the
+                    # arrowhead appears only at the true C-terminal end.
+                    points = [
+                        (left, y - body), (right, y - body),
+                        (right, y + body), (left, y + body),
+                    ]
+                ax.add_patch(patches.Polygon(
+                    points, closed=True, facecolor=color, edgecolor='#A47B37',
+                    linewidth=0.32, joinstyle='miter', zorder=3
+                ))
+            elif code == 'T':
+                turn_label = 'T' * min(3, end - start + 1)
+                ax.text(
+                    (left + right) / 2, y, turn_label,
+                    ha='center', va='center', fontsize=6.1,
+                    color=color, fontweight='bold', fontfamily='DejaVu Sans',
+                    zorder=4,
+                )
+            else:
+                if code == 'S':
+                    bend_path = Path(
+                        [(left, y), ((left + right) / 2, y + 0.052), (right, y)],
+                        [Path.MOVETO, Path.LINETO, Path.LINETO]
+                    )
+                    ax.add_patch(patches.PathPatch(
+                        bend_path, fill=False, edgecolor=color,
+                        linewidth=1.30, capstyle='round', joinstyle='round',
+                        zorder=3
+                    ))
+
+        label_x = -0.34
+        min_x = -max(2.2, longest_name * 0.58) - 0.10
+        max_x = display_columns + 0.18
+        for block in range(block_count):
+            start = block * per_line
+            end = min(start + per_line, alignment_length)
+            columns = end - start
+            number_y = block_top[block]
+            ss_y = self.row_y_positions[block]
+            sequence_top = number_y - 0.34
+            sequence_bottom = sequence_top - (len(items) - 1) * sequence_pitch
+
+            # Faint conservation bands connect related residues vertically
+            # without recreating the saturated ESPript color wall.
+            for column in range(start, end):
+                if not show_conservation:
+                    break
+                residues = [
+                    sequence[column].upper() for _, sequence in items
+                    if sequence[column] not in '-.'
+                ]
+                if len(residues) < 2:
+                    continue
+                counts = {residue: residues.count(residue) for residue in set(residues)}
+                fraction = max(counts.values()) / len(residues)
+                if fraction == 1.0 and len(residues) == len(items):
+                    band_color = conservation_full_color
+                elif fraction >= conservation_threshold:
+                    band_color = conservation_partial_color
+                else:
+                    continue
+                local_column = column - start
+                self.ax.add_patch(patches.Rectangle(
+                    (local_column + 0.04, sequence_bottom - 0.10),
+                    0.92, sequence_top - sequence_bottom + 0.20,
+                    facecolor=band_color, edgecolor='none', zorder=0
+                ))
+
+            # The major mode contains structure glyphs only. Full mode also
+            # retains dotted alignment-gap connectors and explicit coil runs.
+            if structure_mode == 'all':
+                for column, residue in enumerate(selected[start:end]):
+                    if residue not in '-.':
+                        continue
+                    self.ax.plot(
+                        [column + 0.12, column + 0.88], [ss_y, ss_y],
+                        color=backbone_color, linewidth=0.70,
+                        linestyle=(0, (1.0, 1.0)), zorder=2
+                    )
+
+            if 'C' in visible_codes:
+                coil_start = None
+                for local_column in range(columns + 1):
+                    is_coil = (
+                        local_column < columns
+                        and aligned_structure[start + local_column] == 'C'
+                    )
+                    if is_coil and coil_start is None:
+                        coil_start = local_column
+                    elif not is_coil and coil_start is not None:
+                        self.ax.plot(
+                            [coil_start, local_column], [ss_y, ss_y],
+                            color=backbone_color, linewidth=0.85,
+                            solid_capstyle='butt', zorder=1
+                        )
+                        coil_start = None
+
+            for region_start, region_end, code in self.all_contiguous_regions:
+                if code not in visible_codes or code == 'C':
+                    continue
+                segment_start = max(region_start, start)
+                segment_end = min(region_end, end - 1)
+                if segment_start <= segment_end:
+                    draw_structure(
+                        self.ax, segment_start - start, segment_end - start,
+                        code, ss_y,
+                        terminal=(code != 'E' or segment_end == region_end)
+                    )
+
+            if show_residue_numbers:
+                self.ax.text(
+                    0, number_y, str(start + 1), ha='left', va='bottom',
+                    fontsize=max(5.8, sequence_font_size - 1.3),
+                    color=self.colors['residue_number'], fontweight='normal',
+                    fontfamily=mono_family, zorder=5
+                )
+                self.ax.text(
+                    columns, number_y, str(end), ha='right', va='bottom',
+                    fontsize=max(5.8, sequence_font_size - 1.3),
+                    color=self.colors['residue_number'], fontweight='normal',
+                    fontfamily=mono_family, zorder=5
+                )
+            if displayed_structure_label:
+                self.ax.text(
+                    label_x, ss_y, displayed_structure_label, ha='right', va='center',
+                    fontsize=label_font_size - 0.3, color=structure_label_color,
+                    fontfamily='DejaVu Sans', zorder=5
+                )
+
+            for row, (name, sequence) in enumerate(items):
+                text_y = sequence_top - row * sequence_pitch
+                sequence_color = sequence_colors.get(name, self.colors['sequence'])
+                self.ax.text(
+                    label_x, text_y, name, ha='right', va='center',
+                    fontsize=label_font_size, color=sequence_color,
+                    fontweight='bold' if name == structure_sequence else 'normal',
+                    fontfamily='DejaVu Sans', zorder=5
+                )
+                for column, residue in enumerate(sequence[start:end]):
+                    residue = '-' if residue == '.' else residue
+                    self.ax.text(
+                        column + 0.5, text_y, residue, ha='center', va='center',
+                        fontsize=sequence_font_size,
+                        color=self.colors['residue_number'] if residue == '-' else sequence_color,
+                        fontweight='bold' if name == structure_sequence else 'normal',
+                        fontfamily=mono_family, zorder=5
+                    )
+
+            annotation_y = sequence_bottom - annotation_offset
+            if has_disulfide_track:
+                for bond_id, bond in enumerate(bonds, 1):
+                    for position in bond:
+                        column = residue_columns[position]
+                        if start <= column < end:
+                            x = column - start + 0.5
+                            marker_line, = self.ax.plot(
+                                [x - disulfide_line_length / 2,
+                                 x + disulfide_line_length / 2],
+                                [annotation_y + disulfide_line_offset,
+                                 annotation_y + disulfide_line_offset],
+                                color=disulfide_color, linewidth=disulfide_line_width,
+                                solid_capstyle='round', zorder=5,
+                            )
+                            marker_line.set_gid(f'disulfide-{bond_id}')
+                            marker = self.ax.text(
+                                x, annotation_y + disulfide_label_offset, str(bond_id),
+                                ha='center', va='center', fontsize=disulfide_font_size,
+                                color=disulfide_text_color, fontweight='bold',
+                                fontfamily='DejaVu Sans', zorder=6,
+                            )
+                            marker.set_gid(f'disulfide-{bond_id}')
+                annotation_y -= annotation_pitch
+
+            for name, positions in epitope_items:
+                x_positions = [
+                    residue_columns[position] - start + 0.5
+                    for position in positions
+                    if start <= residue_columns[position] < end
+                ]
+                if x_positions:
+                    markers = self.ax.scatter(
+                        x_positions, [annotation_y] * len(x_positions),
+                        marker=epitope_marker, s=epitope_marker_size,
+                        color=resolved_epitope_colors[name],
+                        edgecolors='none', linewidths=0, zorder=5,
+                    )
+                    markers.set_gid(f'epitope-{name}')
+                annotation_y -= annotation_pitch
+
+        min_y = -(block_count - 1) * block_height \
+            - 0.34 - (len(items) - 1) * sequence_pitch - 0.13 - annotation_depth
+        max_y = 0.07
+        self.ax.set_xlim(min_x, max_x)
+        self.ax.set_ylim(min_y, max_y)
+        self.ax.axis('off')
+        if title:
+            self.ax.set_title(
+                title, loc='left', fontsize=9.0, fontweight='bold',
+                color='#27313A', fontfamily='DejaVu Sans', pad=7
+            )
+
+        if show_legend:
+            from matplotlib.lines import Line2D
+            handles = []
+            if 'H' in visible_codes:
+                handles.append(patches.Patch(
+                    facecolor=structure_colors['H'], edgecolor='none', label='alpha-helix'))
+            if 'G' in visible_codes:
+                handles.append(patches.Patch(
+                    facecolor=structure_colors['G'], edgecolor='none', label='3_10-helix'))
+            if 'I' in visible_codes:
+                handles.append(patches.Patch(
+                    facecolor=structure_colors['I'], edgecolor='none', label='pi-helix'))
+            if 'E' in visible_codes:
+                handles.append(patches.Patch(
+                    facecolor=structure_colors['E'], edgecolor='#A47B37', label='beta-strand'))
+            if 'T' in visible_codes:
+                handles.append(Line2D(
+                    [0], [0], color='none', marker='$TT$', markersize=7,
+                    markeredgecolor=structure_colors['T'], label='turn'
+                ))
+            if 'S' in visible_codes:
+                handles.append(Line2D([0], [0], color=structure_colors['S'], lw=1.5, label='bend'))
+            if 'C' in visible_codes:
+                handles.append(Line2D([0], [0], color=structure_colors['C'], lw=1.2, label='coil'))
+            legend_locations = {
+                'right': ('upper right', (0.995, 0.995)),
+                'left': ('upper left', (0.005, 0.995)),
+                'top': ('upper center', (0.50, 0.995)),
+                'bottom': ('lower center', (0.50, 0.005)),
+            }
+            legend_loc, legend_anchor = legend_locations.get(
+                legend_position, (legend_position, None)
+            )
+            self.fig.legend(
+                handles=handles, ncol=legend_columns, loc=legend_loc,
+                bbox_to_anchor=legend_anchor, frameon=False,
+                fontsize=(max(6.0, sequence_font_size - 1.1)
+                          if legend_font_size is None else legend_font_size),
+                handlelength=1.15, handletextpad=0.30, columnspacing=0.65,
+            )
+        if epitope_items and show_epitope_legend:
+            from matplotlib.lines import Line2D
+            epitope_handles = [
+                Line2D(
+                    [0], [0], linestyle='none', marker=epitope_marker,
+                    markersize=epitope_legend_marker_size,
+                    markerfacecolor=resolved_epitope_colors[name],
+                    markeredgewidth=0, label=name,
+                )
+                for name, _ in epitope_items
+            ]
+            self.fig.legend(
+                handles=epitope_handles,
+                ncol=(min(3, len(epitope_handles)) if epitope_legend_columns is None
+                      else epitope_legend_columns),
+                loc=epitope_legend_position, frameon=False,
+                fontsize=(max(6.0, sequence_font_size - 1.0)
+                          if legend_font_size is None else legend_font_size),
+                handlelength=0.8, handletextpad=0.25, columnspacing=0.75,
+            )
+        top = 0.82 if title or show_legend else 0.96
+        bottom = 0.12 if epitope_items and show_epitope_legend else 0.06
+        self.fig.subplots_adjust(left=0.02, right=0.99, top=top, bottom=bottom)
+
+        return self.fig
     
     def _draw_disulfide_bonds(self, ax):
         """绘制二硫键连接标记"""
@@ -447,8 +1095,8 @@ class SecondaryStructureVisualizer:
                 y2 = self.row_y_positions[row2]
                 
                 # 计算标记位置 (在二级结构下方)
-                marker_y1 = y1 - self.helix_unit_height + 17  # 减少距离
-                marker_y2 = y2 - self.helix_unit_height + 17
+                marker_y1 = y1 - self.helix_unit_height + self.disulfide_height_offset
+                marker_y2 = y2 - self.helix_unit_height + self.disulfide_height_offset
                 
                 # 绘制标记
                 self._draw_disulfide_marker(ax, x1, marker_y1, bond_id)
@@ -665,10 +1313,10 @@ class SecondaryStructureVisualizer:
                 first_aa_x = self.aa_positions[row_start_idx][0]
                 ax.text(
                     first_aa_x - self.aa_spacing / 2 - 10,
-                    row_y_center + residue_y_offset,  # 使用新位置
+                    row_y_center + residue_y_offset,
                     str(row_start_idx + 1),
                     ha='right', va='bottom',
-                    fontsize=self.aa_font_size - 2,
+                    fontsize=self.residue_number_font_size,
                     color=self.colors['residue_number'],
                     fontweight='bold',
                     fontfamily=self.aa_font_family,
@@ -679,10 +1327,10 @@ class SecondaryStructureVisualizer:
                 last_aa_x = self.aa_positions[row_end_idx][0]
                 ax.text(
                     last_aa_x + self.aa_spacing / 2 + 10,
-                    row_y_center + residue_y_offset,  # 使用新位置
+                    row_y_center + residue_y_offset,
                     str(row_end_idx + 1),
                     ha='left', va='bottom',
-                    fontsize=self.aa_font_size - 2,
+                    fontsize=self.residue_number_font_size,
                     color=self.colors['residue_number'],
                     fontweight='bold',
                     fontfamily=self.aa_font_family,
@@ -696,11 +1344,11 @@ class SecondaryStructureVisualizer:
             
             # 绘制氨基酸序号
             if show_residue_numbers:
-                residue_y = text_y + self.aa_font_size * self.residue_number_position * 1.5  # 使用新位置
+                residue_y = text_y + self.aa_font_size * self.residue_number_position * 1.5
                 ax.text(
                     x_center, residue_y, str(i+1),
                     ha='center', va='bottom',
-                    fontsize=self.aa_font_size - 2,
+                    fontsize=self.residue_number_font_size,
                     color=self.colors['residue_number'],
                     fontfamily=self.aa_font_family,
                     zorder=10
