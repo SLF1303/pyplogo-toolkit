@@ -4,7 +4,7 @@ A Python package for extracting and visualizing protein secondary structures
 from PDB/CIF files using DSSP with publication-quality output.
 """
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
@@ -57,3 +57,4 @@ __all__ = [
     'OpalTheme',
     'PearlTheme'
 ]
+
