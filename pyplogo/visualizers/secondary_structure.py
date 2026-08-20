@@ -42,7 +42,7 @@ class SecondaryStructureVisualizer:
                  helix_skew=12,
                  beta_body_width_ratio=0.3,
                  beta_head_width_ratio=0.55,
-                 beta_head_length_ratio=0.7,
+                 beta_head_length_ratio=1.0,
                  aa_font_size=15,
                  aa_font_family='Times New Roman',
                  # 新增比例控制参数
@@ -456,6 +456,7 @@ class SecondaryStructureVisualizer:
                                 structure_offset: float = 0.15,
                                 annotation_offset: float = 0.12,
                                 annotation_track_spacing: float = 0.105,
+                                structure_gap: float = 0.08,
                                 show_residue_numbers: bool = True,
                                 show_conservation: bool = True,
                                 conservation_threshold: float = 0.75,
@@ -548,6 +549,8 @@ class SecondaryStructureVisualizer:
         if any(not isinstance(value, (int, float)) or value <= 0
                for value in positive_values.values()):
             raise ValueError("font sizes, spacing, and line dimensions must be positive")
+        if not isinstance(structure_gap, (int, float)) or structure_gap < 0:
+            raise ValueError("structure_gap must be a non-negative number")
         offsets = (structure_offset, annotation_offset,
                    disulfide_line_offset, disulfide_label_offset)
         if any(not isinstance(value, (int, float)) for value in offsets):
@@ -738,9 +741,13 @@ class SecondaryStructureVisualizer:
         mono_family = 'DejaVu Sans Mono'
         backbone_color = '#B5BABE'
 
-        def draw_structure(ax, start, end, code, y, terminal=True):
+        def draw_structure(ax, start, end, code, y, terminal=True,
+                           gap_before=0.0, gap_after=0.0):
             """Draw one structure segment on shared integer column edges."""
-            left, right = float(start), float(end + 1)
+            left = float(start) + gap_before
+            right = float(end + 1) - gap_after
+            if right <= left:
+                return
             color = structure_colors[code]
             if code in {'H', 'G', 'I'}:
                 # Preserve PyPlogo's original helix language: each residue is
@@ -792,8 +799,10 @@ class SecondaryStructureVisualizer:
                 width = right - left
                 body = 0.034
                 if terminal:
-                    head = min(0.30, max(0.20, width * 0.18))
-                    head_half = 0.076
+                    # Keep a prominent arrowhead inside this beta segment so
+                    # neighboring structure elements remain unobscured.
+                    head = min(1.25, max(0.35, width * 0.26), width * 0.42)
+                    head_half = min(0.115, max(0.085, width * 0.16))
                     points = [
                         (left, y - body), (right - head, y - body),
                         (right - head, y - head_half), (right, y),
@@ -907,7 +916,15 @@ class SecondaryStructureVisualizer:
                     draw_structure(
                         self.ax, segment_start - start, segment_end - start,
                         code, ss_y,
-                        terminal=(code != 'E' or segment_end == region_end)
+                        terminal=(code != 'E' or segment_end == region_end),
+                        gap_before=(structure_gap
+                                    if segment_start == region_start
+                                    and segment_start > start
+                                    and aligned_structure[region_start - 1] in visible_codes
+                                    else 0.0),
+                        gap_after=(structure_gap
+                                   if segment_end == region_end
+                                   and segment_end + 1 < end else 0.0),
                     )
 
             if show_residue_numbers:
@@ -1676,7 +1693,11 @@ class SecondaryStructureVisualizer:
                 body_length = total_length * 0.7
                 head_length = total_length * 0.3
             else:
-                head_length = min(self.beta_head_std_length, self.aa_spacing * 0.9)
+                head_length = min(
+                    self.beta_head_std_length,
+                    self.aa_spacing * 1.15,
+                    total_length * 0.34,
+                )
                 body_length = total_length - head_length
         else:
             body_length = total_length

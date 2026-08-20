@@ -8,7 +8,9 @@
 
 **PyPLogo** is a Python toolkit for publication-ready visualization of protein secondary structures and multiple-sequence alignments. It combines compact modern structure glyphs with fine control over layout, colors, legends, and biological annotations.
 
-![PyPLogo alignment example](https://raw.githubusercontent.com/SLF1303/pyplogo-toolkit/main/docs/images/alignment_current_defaults.png)
+![PyPLogo alignment example using public 1LYZ lysozyme data](https://raw.githubusercontent.com/SLF1303/pyplogo-toolkit/main/docs/images/lysozyme_current_defaults.png)
+
+The public examples below use chain A of hen egg-white lysozyme from [PDB 1LYZ](https://www.rcsb.org/structure/1LYZ). The variant rows and surface-patch markers are illustrative documentation data, not a user dataset or a biological claim.
 
 ## 核心能力 / Highlights
 
@@ -41,14 +43,14 @@ The PyPI package requires Python 3.10 or later. Structure extraction from PDB/mm
 ```python
 from pyplogo import SecondaryStructureVisualizer
 
-sequence = "ACDEFGHIKLMNPQRSTVWY"
-secondary_structure = "CCHHHHHCTTTEEEECCCCC"
+sequence = "KVFGRCELAAAMKRHGLDNYRGYSLGNWVCAAKFESNFNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL"
+secondary_structure = "CECCHHHHHHHHHHTTCTTETTECTHHHHHHHHHHHTTESSCEEECTTSCEEETTTTEETTTSCECSSCTTCCCTTCSEGGGGGSSCCHHHHHHHHHHTTSSSGGGGSHHHHHHTTTSCGGGGSTTCCC"
 
 visualizer = SecondaryStructureVisualizer(row_length=50)
 figure = visualizer.create_figure(
     sequence=sequence,
     secondary_structure=secondary_structure,
-    title="Protein secondary structure",
+    title="Hen egg-white lysozyme (PDB 1LYZ)",
     show_residue_numbers=True,
 )
 figure.savefig("secondary_structure.svg", bbox_inches="tight")
@@ -68,9 +70,9 @@ PyPLogo draws an existing equal-length alignment; it does not run the alignment 
 from pyplogo import SecondaryStructureVisualizer
 
 alignment = {
-    "Reference": "MKTAC-DEFGHCIKLMNPQ",
-    "Homolog_A": "MKTACRDEYGHCIKLMNPQ",
-    "Homolog_B": "MRTAC-DEFGHCVKLMNPQ",
+    "Lysozyme_1LYZ": "KVFGRCELAAAMKRHGLDNYRGYSLGNWVCAAKFESNFNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL",
+    "Lysozyme_variant_A": "KVFGRCELAVAMKRHGLDNYRGYSLGNWVCAAKFESNSNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL",
+    "Lysozyme_variant_B": "KVFGRCELAAAMKRHGQDNYRGYSLGNWVCAAKFESNFNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL",
 }
 
 visualizer = SecondaryStructureVisualizer(
@@ -87,27 +89,28 @@ visualizer = SecondaryStructureVisualizer(
 
 figure = visualizer.create_alignment_figure(
     alignment=alignment,
-    structure_sequence="Reference",
-    # Ungapped Reference length: 18 residues
-    secondary_structure="CCCHHHHTTTEEEECCCC",
-    structure_label="Reference structure",
-    amino_acids_per_line=60,
+    structure_sequence="Lysozyme_1LYZ",
+    # DSSP assignment for the public 1LYZ chain A sequence.
+    secondary_structure="CECCHHHHHHHHHHTTCTTETTECTHHHHHHHHHHHTTESSCEEECTTSCEEETTTTEETTTSCECSSCTTCCCTTCSEGGGGGSSCCHHHHHHHHHHTTSSSGGGGSHHHHHHTTTSCGGGGSTTCCC",
+    structure_label="1LYZ structure",
+    amino_acids_per_line=65,
     structure_mode="major",
     sequence_colors={
-        "Reference": "#A96D2D",
-        "Homolog_A": "#59636F",
-        "Homolog_B": "#7568B3",
+        "Lysozyme_1LYZ": "#986B36",
+        "Lysozyme_variant_A": "#5B6B7A",
+        "Lysozyme_variant_B": "#6F68A8",
     },
-    disulfide_bonds=[(5, 11)],
+    # Disulfides reported for the public 1LYZ chain A structure.
+    disulfide_bonds=[(6, 127), (30, 115), (64, 80), (76, 94)],
     epitope_annotations={
-        "Antibody A epitope": [5, 6, 7],
-        "Antibody B epitope": [9, 10, 11],
-        "Antibody C epitope": [12, 13, 14],
+        "Illustrative surface patch A": [22, 23, 24, 25],
+        "Illustrative surface patch B": [52, 53, 54, 55],
+        "Illustrative surface patch C": [101, 102, 103, 104],
     },
     epitope_colors={
-        "Antibody A epitope": "#8CB9DC",
-        "Antibody B epitope": "#D59A9A",
-        "Antibody C epitope": "#A8C565",
+        "Illustrative surface patch A": "#8CB9DC",
+        "Illustrative surface patch B": "#D59A9A",
+        "Illustrative surface patch C": "#A8C565",
     },
     show_legend=True,
     legend_position="bottom",
@@ -117,6 +120,8 @@ figure.savefig("alignment.png", dpi=600, bbox_inches="tight")
 ```
 
 `secondary_structure` 可以使用所选参考序列的**无 gap 长度**，也可以使用完整比对长度。二硫键和表位位置均使用所选参考序列的 **1-based 无 gap 残基编号**。
+
+示例中的三个 surface patch 只是演示注释轨道的占位数据；实际项目中可以替换为实验或结构分析得到的残基位置。
 
 `secondary_structure` may follow either the selected sequence's **ungapped length** or the full alignment length. Disulfide and epitope positions use **1-based ungapped residue coordinates** from the selected reference sequence.
 
@@ -142,7 +147,7 @@ figure.savefig("alignment.png", dpi=600, bbox_inches="tight")
 | --- | --- |
 | Reference and wrapping | `structure_sequence`, `structure_label`, `amino_acids_per_line`, `figsize` |
 | Typography and spacing | `sequence_font_size`, `label_font_size`, `sequence_pitch`, `structure_offset` |
-| Structure display | `structure_mode`, constructor `colors` (`H/G/I/E/T/S/C`, labels, background) |
+| Structure display | `structure_mode`, `structure_gap`, constructor `colors` (`H/G/I/E/T/S/C`, labels, background) |
 | Conservation | `show_conservation`, `conservation_threshold`, `conservation_full_color`, `conservation_partial_color` |
 | Residue scaffolding | `show_residue_numbers`, `sequence_colors` |
 | Structure legend | `show_legend`, `legend_position`, `legend_columns`, `legend_font_size` |
@@ -152,7 +157,7 @@ figure.savefig("alignment.png", dpi=600, bbox_inches="tight")
 
 The defaults provide the base publication style; every group above can be overridden per figure without changing the renderer.
 
-![PyPLogo customization gallery](https://raw.githubusercontent.com/SLF1303/pyplogo-toolkit/main/docs/images/alignment_customization_gallery.png)
+![PyPLogo customization gallery using public lysozyme data](https://raw.githubusercontent.com/SLF1303/pyplogo-toolkit/main/docs/images/lysozyme_customization_gallery.png)
 
 ## PDB/mmCIF 提取 / Structure Extraction
 
@@ -160,14 +165,14 @@ The defaults provide the base publication style; every group above can be overri
 from pyplogo.extractors.structure_based import StructureExtractor
 from pyplogo import SecondaryStructureVisualizer
 
-data = StructureExtractor().from_pdb("protein.pdb", chain_id="A")
+data = StructureExtractor().from_pdb("1LYZ.pdb", chain_id="A")
 
 visualizer = SecondaryStructureVisualizer()
 figure = visualizer.create_figure(
     sequence=data.sequence,
     secondary_structure=data.secondary_structure,
     disulfide_bonds=data.disulfide_bonds,
-    title="Chain A",
+    title="Hen egg-white lysozyme (PDB 1LYZ), chain A",
 )
 figure.savefig("chain_A.pdf", bbox_inches="tight")
 ```
