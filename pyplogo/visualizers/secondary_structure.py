@@ -40,9 +40,9 @@ class SecondaryStructureVisualizer:
                  parallelogram_width=15,
                  helix_unit_height=8.5,
                  helix_skew=12,
-                 beta_body_width_ratio=0.3,
-                 beta_head_width_ratio=0.55,
-                 beta_head_length_ratio=1.0,
+                 beta_body_width_ratio=0.28,
+                 beta_head_width_ratio=0.42,
+                 beta_head_length_ratio=0.58,
                  aa_font_size=15,
                  aa_font_family='Times New Roman',
                  # 新增比例控制参数
@@ -797,16 +797,19 @@ class SecondaryStructureVisualizer:
                         ax.add_patch(patch)
             elif code == 'E':
                 width = right - left
-                body = 0.034
+                body = 0.048
                 if terminal:
-                    # Keep a prominent arrowhead inside this beta segment so
-                    # neighboring structure elements remain unobscured.
-                    head = min(1.25, max(0.35, width * 0.26), width * 0.42)
-                    head_half = min(0.115, max(0.085, width * 0.16))
+                    # Compact flat-ribbon arrow. Short segments get a larger
+                    # head so a one-column strand still reads as an arrow;
+                    # long segments stay capped and publication-compact.
+                    head = min(0.78, max(0.30, width * 0.58), width * 0.70)
+                    head_half = min(0.095, max(0.078, body * 1.65))
+                    shoulder = min(head * 0.18, 0.055)
                     points = [
                         (left, y - body), (right - head, y - body),
-                        (right - head, y - head_half), (right, y),
-                        (right - head, y + head_half), (right - head, y + body),
+                        (right - head + shoulder, y - head_half), (right, y),
+                        (right - head + shoulder, y + head_half),
+                        (right - head, y + body),
                         (left, y + body),
                     ]
                 else:
@@ -817,8 +820,8 @@ class SecondaryStructureVisualizer:
                         (right, y + body), (left, y + body),
                     ]
                 ax.add_patch(patches.Polygon(
-                    points, closed=True, facecolor=color, edgecolor='#A47B37',
-                    linewidth=0.32, joinstyle='miter', zorder=3
+                    points, closed=True, facecolor=color, edgecolor='none',
+                    linewidth=0, joinstyle='round', zorder=3
                 ))
             elif code == 'T':
                 turn_label = 'T' * min(3, end - start + 1)
@@ -1723,10 +1726,11 @@ class SecondaryStructureVisualizer:
         ]
         
         if is_last and head_length > 0:
+            shoulder = min(head_length * 0.42, self.aa_spacing * 0.09)
             vertices.extend([
-                (body_right_x, arrow_lower_y),
+                (body_right_x + shoulder, arrow_lower_y),
                 (arrow_tip_x, y_pos),
-                (body_right_x, arrow_upper_y),
+                (body_right_x + shoulder, arrow_upper_y),
             ])
         
         vertices.extend([
@@ -1740,7 +1744,8 @@ class SecondaryStructureVisualizer:
         
         arrow_patch = patches.PathPatch(
             arrow_path, facecolor=self.colors['E'],
-            edgecolor=self.colors['edge'], alpha=0.95, linewidth=0.8, zorder=3
+            edgecolor='none', alpha=0.96, linewidth=0, zorder=3,
+            joinstyle='round'
         )
         ax.add_patch(arrow_patch)
     
